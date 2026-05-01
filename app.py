@@ -95,11 +95,23 @@ PAGE = """
     button:hover {
       background: #1d4ed8;
     }
+    button:disabled {
+      cursor: wait;
+      background: #94a3b8;
+    }
     .message {
       padding: 14px 16px;
       border-top: 1px solid #e6ecf5;
       color: #9f1239;
       background: #fff1f2;
+    }
+    .status {
+      min-height: 22px;
+      color: #2563eb;
+      font-weight: 650;
+    }
+    .status.error {
+      color: #9f1239;
     }
     @media (max-width: 760px) {
       .grid {
@@ -129,21 +141,77 @@ PAGE = """
       <section>
         <h2>PDF OCR Converter</h2>
         <p>Upload a PDF and download a searchable OCR-processed PDF.</p>
-        <form action="/ocr" method="post" enctype="multipart/form-data">
+        <form action="/ocr" method="post" enctype="multipart/form-data" data-download-form>
           <input type="file" name="pdf_file" accept="application/pdf,.pdf" required>
           <button type="submit">Process PDF</button>
+          <div class="status" aria-live="polite"></div>
         </form>
       </section>
       <section>
         <h2>Excel to CSV Converter</h2>
         <p>Upload an Excel workbook and download the first sheet as a CSV file.</p>
-        <form action="/excel" method="post" enctype="multipart/form-data">
+        <form action="/excel" method="post" enctype="multipart/form-data" data-download-form>
           <input type="file" name="excel_file" accept=".xlsx,.xls" required>
           <button type="submit">Convert to CSV</button>
+          <div class="status" aria-live="polite"></div>
         </form>
       </section>
     </div>
   </main>
+  <script>
+    function filenameFromDisposition(disposition, fallback) {
+      if (!disposition) return fallback;
+      const match = disposition.match(/filename="?([^"]+)"?/i);
+      return match ? match[1] : fallback;
+    }
+
+    document.querySelectorAll("[data-download-form]").forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const button = form.querySelector("button");
+        const status = form.querySelector(".status");
+        const originalText = button.textContent;
+        const fallbackName = form.action.endsWith("/excel") ? "converted.csv" : "processed.pdf";
+
+        button.disabled = true;
+        button.textContent = "Processing...";
+        status.classList.remove("error");
+        status.textContent = "Uploading and processing. OCR can take a few minutes for large PDFs.";
+
+        try {
+          const response = await fetch(form.action, {
+            method: "POST",
+            body: new FormData(form),
+          });
+
+          if (!response.ok) {
+            const message = await response.text();
+            throw new Error(message.replace(/<[^>]*>/g, " ").replace(/\\s+/g, " ").trim() || "Processing failed.");
+          }
+
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = filenameFromDisposition(response.headers.get("content-disposition"), fallbackName);
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(url);
+
+          status.textContent = "Done. Your download should start automatically.";
+          form.reset();
+        } catch (error) {
+          status.classList.add("error");
+          status.textContent = error.message || "Processing failed.";
+        } finally {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
+      });
+    });
+  </script>
 </body>
 </html>
 """
@@ -156,6 +224,11 @@ def render_page(message=None):
 @app.get("/")
 def index():
     return render_page()
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 @app.post("/ocr")
