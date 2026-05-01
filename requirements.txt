@@ -3,3 +3,4 @@ openpyxl==3.1.2
 Flask==3.0.3
 Werkzeug==3.0.6
 ocrmypdf==16.11.1
+xlrd==2.0.1

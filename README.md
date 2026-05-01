@@ -13,6 +13,8 @@ Document Converter Pro is a Flask web app for:
 
 - PDF OCR conversion with `ocrmypdf`
 - Excel to CSV conversion with `pandas` and `openpyxl`
+- Fast default OCR mode that skips pages that already contain text
+- Streaming `.xlsx` conversion to reduce memory use on large workbooks
 
 ## Important: GitHub Pages will not run this app
 

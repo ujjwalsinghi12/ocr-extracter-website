@@ -1,9 +1,12 @@
+import csv
+import multiprocessing
 import os
 import tempfile
 
 import ocrmypdf
 import pandas as pd
-from flask import Flask, render_template_string, request, send_file
+from flask import Flask, after_this_request, render_template_string, request, send_file
+from openpyxl import load_workbook
 from werkzeug.utils import secure_filename
 
 
@@ -75,13 +78,15 @@ PAGE = """
       gap: 16px;
       margin-top: 22px;
     }
-    input[type="file"] {
+    input[type="file"],
+    select {
       width: 100%;
       box-sizing: border-box;
       padding: 12px;
       border: 1px solid #cbd5e1;
       border-radius: 6px;
       background: #f8fafc;
+      color: #172033;
     }
     button {
       min-height: 44px;
@@ -143,6 +148,10 @@ PAGE = """
         <p>Upload a PDF and download a searchable OCR-processed PDF.</p>
         <form action="/ocr" method="post" enctype="multipart/form-data" data-download-form>
           <input type="file" name="pdf_file" accept="application/pdf,.pdf" required>
+          <select name="mode" aria-label="OCR mode">
+            <option value="fast" selected>Fast OCR - skip pages that already have text</option>
+            <option value="accurate">High accuracy - slower full OCR</option>
+          </select>
           <button type="submit">Process PDF</button>
           <div class="status" aria-live="polite"></div>
         </form>
@@ -177,7 +186,9 @@ PAGE = """
         button.disabled = true;
         button.textContent = "Processing...";
         status.classList.remove("error");
-        status.textContent = "Uploading and processing. OCR can take a few minutes for large PDFs.";
+        status.textContent = form.action.endsWith("/ocr")
+          ? "Uploading and processing. Fast mode skips pages that already contain text."
+          : "Uploading and converting. Large workbooks may take a moment.";
 
         try {
           const response = await fetch(form.action, {
@@ -231,6 +242,43 @@ def health():
     return {"status": "ok"}
 
 
+def remove_later(path):
+    def cleanup():
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    @after_this_request
+    def schedule_cleanup(response):
+        response.call_on_close(cleanup)
+        return response
+
+
+def ocr_options(mode):
+    workers = max(1, min(4, multiprocessing.cpu_count()))
+    if mode == "accurate":
+        return {
+            "force_ocr": True,
+            "deskew": True,
+            "rotate_pages": True,
+            "oversample": 300,
+            "optimize": 1,
+            "jobs": workers,
+            "progress_bar": False,
+        }
+
+    return {
+        "skip_text": True,
+        "deskew": False,
+        "rotate_pages": False,
+        "oversample": 150,
+        "optimize": 1,
+        "jobs": workers,
+        "progress_bar": False,
+    }
+
+
 @app.post("/ocr")
 def ocr_pdf():
     uploaded = request.files.get("pdf_file")
@@ -248,15 +296,14 @@ def ocr_pdf():
 
     try:
         uploaded.save(input_file.name)
+        os.remove(output_file.name)
         ocrmypdf.ocr(
             input_file.name,
             output_file.name,
-            force_ocr=True,
-            deskew=True,
-            rotate_pages=True,
-            oversample=300,
+            **ocr_options(request.form.get("mode", "fast")),
         )
         download_name = f"ocr_{filename}"
+        remove_later(output_file.name)
         return send_file(output_file.name, as_attachment=True, download_name=download_name)
     except Exception as exc:
         return render_page(f"OCR failed: {exc}"), 500
@@ -265,6 +312,32 @@ def ocr_pdf():
             os.remove(input_file.name)
         except OSError:
             pass
+
+
+def convert_xlsx_to_csv(input_path, output_path):
+    workbook = load_workbook(input_path, read_only=True, data_only=True)
+    try:
+        sheet = workbook.active
+        with open(output_path, "w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.writer(csv_file)
+            for row in sheet.iter_rows(values_only=True):
+                writer.writerow(["" if value is None else value for value in row])
+    finally:
+        workbook.close()
+
+
+def convert_excel_file(input_path, output_path, extension):
+    if extension == ".xlsx":
+        convert_xlsx_to_csv(input_path, output_path)
+        return
+
+    df = pd.read_excel(
+        input_path,
+        dtype=str,
+        parse_dates=False,
+        keep_default_na=False,
+    )
+    df.to_csv(output_path, index=False, encoding="utf-8")
 
 
 @app.post("/excel")
@@ -277,22 +350,17 @@ def excel_to_csv():
     if not filename.lower().endswith((".xlsx", ".xls")):
         return render_page("Please upload a valid Excel file."), 400
 
-    input_file = tempfile.NamedTemporaryFile(suffix=os.path.splitext(filename)[1], delete=False)
+    extension = os.path.splitext(filename)[1].lower()
+    input_file = tempfile.NamedTemporaryFile(suffix=extension, delete=False)
     output_file = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
     input_file.close()
     output_file.close()
 
     try:
         uploaded.save(input_file.name)
-        df = pd.read_excel(
-            input_file.name,
-            engine="openpyxl",
-            dtype=str,
-            parse_dates=False,
-            keep_default_na=False,
-        )
-        df.to_csv(output_file.name, index=False, encoding="utf-8")
+        convert_excel_file(input_file.name, output_file.name, extension)
         download_name = f"{os.path.splitext(filename)[0]}.csv"
+        remove_later(output_file.name)
         return send_file(output_file.name, as_attachment=True, download_name=download_name)
     except Exception as exc:
         return render_page(f"Conversion failed: {exc}"), 500
