@@ -26,109 +26,223 @@ PAGE = """
       color-scheme: light;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: #172033;
-      background: #eef2f7;
+      background: #e8edf5;
+    }
+    * {
+      box-sizing: border-box;
     }
     body {
       margin: 0;
       min-height: 100vh;
-      display: grid;
-      place-items: center;
-      padding: 32px 16px;
+      padding: 28px 18px;
+      background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.16), transparent 30rem),
+        linear-gradient(135deg, #f8fafc 0%, #e8edf5 52%, #e6f4ef 100%);
     }
     main {
-      width: min(960px, 100%);
-      background: #ffffff;
-      border: 1px solid #dbe3ef;
-      border-radius: 8px;
-      box-shadow: 0 18px 50px rgba(23, 32, 51, 0.12);
-      overflow: hidden;
+      width: min(1120px, 100%);
+      margin: 0 auto;
     }
     header {
-      padding: 28px 32px;
-      border-bottom: 1px solid #e6ecf5;
-      background: #f8fafc;
+      display: grid;
+      gap: 18px;
+      padding: 34px 0 26px;
     }
     h1 {
       margin: 0 0 8px;
-      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      font-size: clamp(2rem, 5vw, 4rem);
+      line-height: 1;
       letter-spacing: 0;
+      color: #0f172a;
     }
     p {
       margin: 0;
       color: #526173;
       line-height: 1.5;
     }
+    .hero-copy {
+      max-width: 740px;
+    }
+    .hero-copy p {
+      font-size: 1.03rem;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(37, 99, 235, 0.18);
+      background: rgba(255, 255, 255, 0.72);
+      color: #1f3f75;
+      font-size: 0.88rem;
+      font-weight: 700;
+    }
     .grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0;
+      gap: 18px;
     }
     section {
-      padding: 32px;
+      display: grid;
+      align-content: start;
+      gap: 18px;
+      min-height: 440px;
+      padding: 26px;
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid rgba(148, 163, 184, 0.32);
+      border-radius: 8px;
+      box-shadow: 0 20px 55px rgba(15, 23, 42, 0.12);
+      backdrop-filter: blur(12px);
     }
-    section + section {
-      border-left: 1px solid #e6ecf5;
+    .panel-top {
+      display: grid;
+      gap: 10px;
     }
     h2 {
-      margin: 0 0 10px;
-      font-size: 1.15rem;
+      margin: 0;
+      font-size: 1.35rem;
+      color: #111827;
+    }
+    .tag {
+      width: fit-content;
+      padding: 6px 9px;
+      border-radius: 6px;
+      background: #ecfdf5;
+      color: #047857;
+      font-size: 0.78rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
     form {
       display: grid;
       gap: 16px;
-      margin-top: 22px;
+      margin-top: 4px;
     }
     input[type="file"],
     select {
       width: 100%;
-      box-sizing: border-box;
-      padding: 12px;
+      min-height: 48px;
+      padding: 12px 14px;
       border: 1px solid #cbd5e1;
       border-radius: 6px;
-      background: #f8fafc;
+      background: #ffffff;
       color: #172033;
+      font: inherit;
+    }
+    input[type="file"]::file-selector-button {
+      margin-right: 12px;
+      border: 0;
+      border-radius: 5px;
+      background: #e0f2fe;
+      color: #075985;
+      padding: 9px 12px;
+      font-weight: 800;
     }
     button {
       min-height: 44px;
       border: 0;
       border-radius: 6px;
-      background: #2563eb;
+      background: linear-gradient(135deg, #2563eb, #059669);
       color: white;
       font-weight: 700;
       cursor: pointer;
+      font: inherit;
+      box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
     }
     button:hover {
-      background: #1d4ed8;
+      filter: brightness(0.96);
     }
     button:disabled {
       cursor: wait;
       background: #94a3b8;
+      box-shadow: none;
     }
     .message {
       padding: 14px 16px;
-      border-top: 1px solid #e6ecf5;
+      margin-bottom: 18px;
+      border: 1px solid #fecdd3;
+      border-radius: 8px;
       color: #9f1239;
       background: #fff1f2;
     }
+    .progress-wrap {
+      display: none;
+      gap: 8px;
+    }
+    .progress-wrap.active {
+      display: grid;
+    }
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: #334155;
+      font-size: 0.9rem;
+      font-weight: 750;
+    }
+    .progress-track {
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #dbe5f1;
+    }
+    .progress-bar {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #2563eb, #22c55e, #f59e0b);
+      transition: width 320ms ease;
+    }
     .status {
-      min-height: 22px;
+      min-height: 24px;
       color: #2563eb;
       font-weight: 650;
+    }
+    .status.success {
+      color: #047857;
     }
     .status.error {
       color: #9f1239;
     }
+    .download-link {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      border-radius: 6px;
+      background: #111827;
+      color: #ffffff;
+      text-decoration: none;
+      font-weight: 800;
+    }
+    .download-link.ready {
+      display: flex;
+    }
+    .details {
+      display: grid;
+      gap: 8px;
+      margin-top: auto;
+      padding-top: 8px;
+      color: #64748b;
+      font-size: 0.9rem;
+    }
     @media (max-width: 760px) {
+      body {
+        padding: 18px 12px;
+      }
       .grid {
         grid-template-columns: 1fr;
       }
-      section + section {
-        border-left: 0;
-        border-top: 1px solid #e6ecf5;
-      }
-      header,
       section {
-        padding: 24px;
+        min-height: auto;
+        padding: 22px;
       }
     }
   </style>
@@ -136,16 +250,27 @@ PAGE = """
 <body>
   <main>
     <header>
-      <h1>Document Converter Pro</h1>
-      <p>Convert scanned PDFs into searchable PDFs, or export Excel sheets as CSV files.</p>
+      <div class="hero-copy">
+        <h1>Document Converter Pro</h1>
+        <p>Fast OCR and spreadsheet conversion in one focused workspace. Upload your file, watch the process complete, then download only when the processed document is ready.</p>
+      </div>
+      <div class="toolbar" aria-label="Capabilities">
+        <span class="pill">PDF OCR</span>
+        <span class="pill">Excel to CSV</span>
+        <span class="pill">Fast mode</span>
+        <span class="pill">Private processing</span>
+      </div>
     </header>
     {% if message %}
       <div class="message">{{ message }}</div>
     {% endif %}
     <div class="grid">
       <section>
-        <h2>PDF OCR Converter</h2>
-        <p>Upload a PDF and download a searchable OCR-processed PDF.</p>
+        <div class="panel-top">
+          <span class="tag">OCR engine</span>
+          <h2>PDF OCR Converter</h2>
+          <p>Turn scanned PDFs into searchable documents. Fast mode skips pages that already contain selectable text.</p>
+        </div>
         <form action="/ocr" method="post" enctype="multipart/form-data" data-download-form>
           <input type="file" name="pdf_file" accept="application/pdf,.pdf" required>
           <select name="mode" aria-label="OCR mode">
@@ -153,17 +278,48 @@ PAGE = """
             <option value="accurate">High accuracy - slower full OCR</option>
           </select>
           <button type="submit">Process PDF</button>
+          <div class="progress-wrap" aria-hidden="true">
+            <div class="progress-label">
+              <span>Processing document</span>
+              <span data-progress-value>0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-bar"></div>
+            </div>
+          </div>
           <div class="status" aria-live="polite"></div>
+          <a class="download-link" href="#" download>Download processed document</a>
         </form>
+        <div class="details">
+          <span>Best for: scanned PDFs, contracts, reports, office paperwork.</span>
+          <span>Tip: use high accuracy only when fast mode misses text.</span>
+        </div>
       </section>
       <section>
-        <h2>Excel to CSV Converter</h2>
-        <p>Upload an Excel workbook and download the first sheet as a CSV file.</p>
+        <div class="panel-top">
+          <span class="tag">Spreadsheet export</span>
+          <h2>Excel to CSV Converter</h2>
+          <p>Convert the first worksheet into a clean CSV file using a memory-efficient streaming path for XLSX workbooks.</p>
+        </div>
         <form action="/excel" method="post" enctype="multipart/form-data" data-download-form>
           <input type="file" name="excel_file" accept=".xlsx,.xls" required>
           <button type="submit">Convert to CSV</button>
+          <div class="progress-wrap" aria-hidden="true">
+            <div class="progress-label">
+              <span>Processing document</span>
+              <span data-progress-value>0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-bar"></div>
+            </div>
+          </div>
           <div class="status" aria-live="polite"></div>
+          <a class="download-link" href="#" download>Download processed document</a>
         </form>
+        <div class="details">
+          <span>Best for: tables, exports, lead lists, accounting sheets.</span>
+          <span>Output: first worksheet saved as UTF-8 CSV.</span>
+        </div>
       </section>
     </div>
   </main>
@@ -175,22 +331,51 @@ PAGE = """
     }
 
     document.querySelectorAll("[data-download-form]").forEach((form) => {
+      let activeDownloadUrl = null;
+
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
 
         const button = form.querySelector("button");
         const status = form.querySelector(".status");
+        const progressWrap = form.querySelector(".progress-wrap");
+        const progressBar = form.querySelector(".progress-bar");
+        const progressValue = form.querySelector("[data-progress-value]");
+        const downloadLink = form.querySelector(".download-link");
         const originalText = button.textContent;
         const fallbackName = form.action.endsWith("/excel") ? "converted.csv" : "processed.pdf";
+        let progress = 0;
+        let progressTimer = null;
+
+        if (activeDownloadUrl) {
+          URL.revokeObjectURL(activeDownloadUrl);
+          activeDownloadUrl = null;
+        }
+        downloadLink.classList.remove("ready");
+        downloadLink.removeAttribute("href");
+
+        const setProgress = (value) => {
+          progress = Math.max(progress, Math.min(value, 100));
+          progressBar.style.width = `${progress}%`;
+          progressValue.textContent = `${Math.round(progress)}%`;
+        };
 
         button.disabled = true;
         button.textContent = "Processing...";
-        status.classList.remove("error");
+        progressWrap.classList.add("active");
+        progressWrap.setAttribute("aria-hidden", "false");
+        setProgress(8);
+        status.classList.remove("error", "success");
         status.textContent = form.action.endsWith("/ocr")
           ? "Uploading and processing. Fast mode skips pages that already contain text."
           : "Uploading and converting. Large workbooks may take a moment.";
 
         try {
+          progressTimer = window.setInterval(() => {
+            const next = progress < 55 ? progress + 7 : progress < 86 ? progress + 3 : progress + 0.6;
+            setProgress(Math.min(next, 94));
+          }, 650);
+
           const response = await fetch(form.action, {
             method: "POST",
             body: new FormData(form),
@@ -202,21 +387,22 @@ PAGE = """
           }
 
           const blob = await response.blob();
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = filenameFromDisposition(response.headers.get("content-disposition"), fallbackName);
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          URL.revokeObjectURL(url);
+          activeDownloadUrl = URL.createObjectURL(blob);
+          downloadLink.href = activeDownloadUrl;
+          downloadLink.download = filenameFromDisposition(response.headers.get("content-disposition"), fallbackName);
+          downloadLink.classList.add("ready");
 
-          status.textContent = "Done. Your download should start automatically.";
-          form.reset();
+          setProgress(100);
+          status.classList.add("success");
+          status.textContent = "Processed. Your document is ready to download.";
         } catch (error) {
+          setProgress(100);
           status.classList.add("error");
           status.textContent = error.message || "Processing failed.";
         } finally {
+          if (progressTimer) {
+            window.clearInterval(progressTimer);
+          }
           button.disabled = false;
           button.textContent = originalText;
         }
