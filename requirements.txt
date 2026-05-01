@@ -1,4 +1,5 @@
 pandas==2.2.2
 openpyxl==3.1.2
 gradio==4.28.3
+huggingface-hub==0.23.5
 ocrmypdf==16.11.1
