@@ -1,3 +1,12 @@
+---
+title: Document Converter Pro
+emoji: 📄
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+---
+
 # Document Converter Pro
 
 Document Converter Pro is a Gradio web app for:
