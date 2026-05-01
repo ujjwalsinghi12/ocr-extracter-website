@@ -1,0 +1,12 @@
+.git
+.github
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+uploads/
+processed/
+*.pdf
+*.xlsx
+*.xls
+*.csv
