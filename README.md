@@ -9,7 +9,7 @@ app_port: 7860
 
 # Document Converter Pro
 
-Document Converter Pro is a Gradio web app for:
+Document Converter Pro is a Flask web app for:
 
 - PDF OCR conversion with `ocrmypdf`
 - Excel to CSV conversion with `pandas` and `openpyxl`
@@ -53,7 +53,7 @@ Open `http://localhost:7860`.
 
 ## Files
 
-- `app.py`: deployable Gradio app
+- `app.py`: deployable Flask app
 - `Dockerfile`: container build for deployment
 - `requirements.txt`: Python dependencies
 - `.github/workflows/deploy-huggingface.yml`: optional GitHub Actions deployment workflow
