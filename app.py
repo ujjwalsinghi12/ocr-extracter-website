@@ -20,6 +20,7 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
 OCR_PRICE_PER_PAGE_PAISE = 50
 PENDING_ORDERS = {}
+BYPASS_ACCESS_KEY = os.getenv("OCR_BYPASS_KEY", "215836").strip()
 
 
 PAGE = """
@@ -134,7 +135,9 @@ PAGE = """
       margin-top: 4px;
     }
     input[type="file"],
-    select {
+    select,
+    input[type="password"],
+    input[type="text"] {
       width: 100%;
       min-height: 48px;
       padding: 12px 14px;
@@ -303,10 +306,11 @@ PAGE = """
             <option value="fast" selected>Fast OCR - skip pages that already have text</option>
             <option value="accurate">High accuracy - slower full OCR</option>
           </select>
+          <input type="password" name="access_key" inputmode="numeric" autocomplete="off" placeholder="Access key for free processing">
           <button type="submit">Pay and Process PDF</button>
           <div class="billing-summary" aria-live="polite">
             <span data-billing-total></span>
-            <span>Rate: INR 0.50 per PDF page. OCR starts only after payment succeeds.</span>
+            <span>Rate: INR 0.50 per PDF page. A valid access key skips payment.</span>
           </div>
           <div class="progress-wrap" aria-hidden="true">
             <div class="progress-label">
@@ -465,23 +469,34 @@ PAGE = """
           const formData = new FormData(form);
 
           if (requiresPayment) {
-            const order = await createOcrOrder(form);
-            if (billingSummary && billingTotal) {
-              billingTotal.textContent = `${order.pages} page${order.pages === 1 ? "" : "s"} x INR 0.50 = INR ${order.display_amount}`;
-              billingSummary.classList.add("ready");
+            const accessKey = formData.get("access_key");
+            if (accessKey && accessKey.trim()) {
+              if (billingSummary && billingTotal) {
+                billingTotal.textContent = "Access key entered. Payment will be skipped after server verification.";
+                billingSummary.classList.add("ready");
+              }
+              setProgress(20);
+              button.textContent = "Processing...";
+              status.textContent = "Checking access key and starting OCR.";
+            } else {
+              const order = await createOcrOrder(form);
+              if (billingSummary && billingTotal) {
+                billingTotal.textContent = `${order.pages} page${order.pages === 1 ? "" : "s"} x INR 0.50 = INR ${order.display_amount}`;
+                billingSummary.classList.add("ready");
+              }
+
+              setProgress(18);
+              button.textContent = "Waiting for payment...";
+              status.textContent = `Complete INR ${order.display_amount} payment to start OCR.`;
+              const payment = await openRazorpayCheckout(order);
+
+              formData.append("razorpay_payment_id", payment.razorpay_payment_id);
+              formData.append("razorpay_order_id", payment.razorpay_order_id);
+              formData.append("razorpay_signature", payment.razorpay_signature);
+              setProgress(26);
+              button.textContent = "Processing...";
+              status.textContent = "Payment verified by Razorpay. OCR is processing now.";
             }
-
-            setProgress(18);
-            button.textContent = "Waiting for payment...";
-            status.textContent = `Complete INR ${order.display_amount} payment to start OCR.`;
-            const payment = await openRazorpayCheckout(order);
-
-            formData.append("razorpay_payment_id", payment.razorpay_payment_id);
-            formData.append("razorpay_order_id", payment.razorpay_order_id);
-            formData.append("razorpay_signature", payment.razorpay_signature);
-            setProgress(26);
-            button.textContent = "Processing...";
-            status.textContent = "Payment verified by Razorpay. OCR is processing now.";
           }
 
           progressTimer = window.setInterval(() => {
@@ -587,6 +602,11 @@ def verify_razorpay_signature(order_id, payment_id, signature):
     return hmac.compare_digest(expected, signature or "")
 
 
+def has_valid_bypass_key():
+    access_key = request.form.get("access_key", "").strip()
+    return bool(BYPASS_ACCESS_KEY and hmac.compare_digest(access_key, BYPASS_ACCESS_KEY))
+
+
 def ocr_options(mode):
     workers = max(1, min(4, multiprocessing.cpu_count()))
     if mode == "accurate":
@@ -680,14 +700,15 @@ def ocr_pdf():
         signature = request.form.get("razorpay_signature", "")
         order = PENDING_ORDERS.get(order_id)
 
-        if not order_id or not payment_id or not signature:
-            return render_page("Complete the Razorpay payment before OCR processing."), 402
-        if not order:
-            return render_page("Payment order expired. Please calculate payment and try again."), 402
-        if order["pages"] != page_count:
-            return render_page("Uploaded PDF page count changed after payment. Please pay again for this file."), 400
-        if not verify_razorpay_signature(order_id, payment_id, signature):
-            return render_page("Payment verification failed. Please try again."), 402
+        if not has_valid_bypass_key():
+            if not order_id or not payment_id or not signature:
+                return render_page("Complete the Razorpay payment before OCR processing."), 402
+            if not order:
+                return render_page("Payment order expired. Please calculate payment and try again."), 402
+            if order["pages"] != page_count:
+                return render_page("Uploaded PDF page count changed after payment. Please pay again for this file."), 400
+            if not verify_razorpay_signature(order_id, payment_id, signature):
+                return render_page("Payment verification failed. Please try again."), 402
 
         os.remove(output_path)
         ocrmypdf.ocr(
@@ -697,7 +718,8 @@ def ocr_pdf():
         )
         download_name = f"ocr_{filename}"
         remove_later(output_path)
-        PENDING_ORDERS.pop(order_id, None)
+        if order_id:
+            PENDING_ORDERS.pop(order_id, None)
         output_sent = True
         return send_file(output_path, as_attachment=True, download_name=download_name)
     except ValueError as exc:

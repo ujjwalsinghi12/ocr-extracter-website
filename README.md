@@ -48,6 +48,12 @@ RAZORPAY_KEY_SECRET=your_key_secret
 
 The OCR price is configured in `app.py` as `OCR_PRICE_PER_PAGE_PAISE = 50`, which is INR 0.50 per page.
 
+The owner bypass key defaults to `215836`. To change it without editing code, set this optional secret:
+
+```bash
+OCR_BYPASS_KEY=your_private_access_key
+```
+
 ## Run locally
 
 Install system dependencies first:
