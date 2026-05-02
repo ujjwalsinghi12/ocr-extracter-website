@@ -620,7 +620,7 @@ def create_ocr_order():
         if page_count < 1:
             return jsonify({"error": "This PDF does not contain any pages."}), 400
 
-        key_id, _ = razorpay_keys()
+        key_id, key_secret = razorpay_keys()
         amount = page_count * OCR_PRICE_PER_PAGE_PAISE
         client = razorpay.Client(auth=(key_id, key_secret))
         order = client.order.create(
