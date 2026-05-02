@@ -4,3 +4,5 @@ Flask==3.0.3
 Werkzeug==3.0.6
 ocrmypdf==16.11.1
 xlrd==2.0.1
+razorpay==1.4.2
+pypdf==4.3.1

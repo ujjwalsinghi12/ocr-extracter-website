@@ -15,6 +15,7 @@ Document Converter Pro is a Flask web app for:
 - Excel to CSV conversion with `pandas` and `openpyxl`
 - Fast default OCR mode that skips pages that already contain text
 - Streaming `.xlsx` conversion to reduce memory use on large workbooks
+- Razorpay payment before PDF OCR processing at INR 0.50 per PDF page
 
 ## Important: GitHub Pages will not run this app
 
@@ -33,6 +34,19 @@ Use GitHub as the source repository, then deploy the app to a Python/container h
 5. Push to the `main` branch, or run the **Deploy to Hugging Face Space** workflow manually from the GitHub Actions tab.
 
 The included `Dockerfile` installs the required OCR system packages and starts `app.py` on port `7860`.
+
+## Razorpay setup
+
+PDF OCR processing is payment gated. The app counts PDF pages, creates a Razorpay order, waits for a successful Checkout payment, verifies the payment signature on the server, and only then starts OCR.
+
+Set these environment variables in your deployment host or Hugging Face Space secrets:
+
+```bash
+RAZORPAY_KEY_ID=rzp_test_or_live_key_id
+RAZORPAY_KEY_SECRET=your_key_secret
+```
+
+The OCR price is configured in `app.py` as `OCR_PRICE_PER_PAGE_PAISE = 50`, which is INR 0.50 per page.
 
 ## Run locally
 

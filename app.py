@@ -1,17 +1,25 @@
 import csv
+import hmac
+import hashlib
 import multiprocessing
 import os
 import tempfile
+import uuid
 
 import ocrmypdf
 import pandas as pd
-from flask import Flask, after_this_request, render_template_string, request, send_file
+import razorpay
+from flask import Flask, after_this_request, jsonify, render_template_string, request, send_file
 from openpyxl import load_workbook
+from pypdf import PdfReader
 from werkzeug.utils import secure_filename
 
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
+
+OCR_PRICE_PER_PAGE_PAISE = 50
+PENDING_ORDERS = {}
 
 
 PAGE = """
@@ -225,6 +233,24 @@ PAGE = """
     .download-link.ready {
       display: flex;
     }
+    .billing-summary {
+      display: none;
+      gap: 6px;
+      padding: 12px 14px;
+      border: 1px solid #bfdbfe;
+      border-radius: 6px;
+      background: #eff6ff;
+      color: #1e3a8a;
+      font-weight: 750;
+    }
+    .billing-summary.ready {
+      display: grid;
+    }
+    .billing-summary span:last-child {
+      color: #475569;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
     .details {
       display: grid;
       gap: 8px;
@@ -271,13 +297,17 @@ PAGE = """
           <h2>PDF OCR Converter</h2>
           <p>Turn scanned PDFs into searchable documents. Fast mode skips pages that already contain selectable text.</p>
         </div>
-        <form action="/ocr" method="post" enctype="multipart/form-data" data-download-form>
+        <form action="/ocr" method="post" enctype="multipart/form-data" data-download-form data-payment-required>
           <input type="file" name="pdf_file" accept="application/pdf,.pdf" required>
           <select name="mode" aria-label="OCR mode">
             <option value="fast" selected>Fast OCR - skip pages that already have text</option>
             <option value="accurate">High accuracy - slower full OCR</option>
           </select>
-          <button type="submit">Process PDF</button>
+          <button type="submit">Pay and Process PDF</button>
+          <div class="billing-summary" aria-live="polite">
+            <span data-billing-total></span>
+            <span>Rate: INR 0.50 per PDF page. OCR starts only after payment succeeds.</span>
+          </div>
           <div class="progress-wrap" aria-hidden="true">
             <div class="progress-label">
               <span>Processing document</span>
@@ -323,11 +353,66 @@ PAGE = """
       </section>
     </div>
   </main>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script>
     function filenameFromDisposition(disposition, fallback) {
       if (!disposition) return fallback;
       const match = disposition.match(/filename="?([^"]+)"?/i);
       return match ? match[1] : fallback;
+    }
+
+    async function errorFromResponse(response, fallback) {
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const payload = await response.json();
+        return payload.error || fallback;
+      }
+      const message = await response.text();
+      return message.replace(/<[^>]*>/g, " ").replace(/\\s+/g, " ").trim() || fallback;
+    }
+
+    async function createOcrOrder(form) {
+      const response = await fetch("/ocr/order", {
+        method: "POST",
+        body: new FormData(form),
+      });
+
+      if (!response.ok) {
+        throw new Error(await errorFromResponse(response, "Could not calculate OCR payment."));
+      }
+
+      return response.json();
+    }
+
+    function openRazorpayCheckout(order) {
+      return new Promise((resolve, reject) => {
+        if (!window.Razorpay) {
+          reject(new Error("Razorpay checkout could not load. Please refresh and try again."));
+          return;
+        }
+
+        const checkout = new Razorpay({
+          key: order.key,
+          amount: order.amount,
+          currency: order.currency,
+          name: "Document Converter Pro",
+          description: `OCR for ${order.pages} PDF page${order.pages === 1 ? "" : "s"}`,
+          order_id: order.order_id,
+          handler: resolve,
+          modal: {
+            ondismiss: () => reject(new Error("Payment was not completed.")),
+          },
+          theme: {
+            color: "#2563eb",
+          },
+        });
+
+        checkout.on("payment.failed", (response) => {
+          reject(new Error(response.error && response.error.description ? response.error.description : "Payment failed."));
+        });
+
+        checkout.open();
+      });
     }
 
     document.querySelectorAll("[data-download-form]").forEach((form) => {
@@ -342,8 +427,11 @@ PAGE = """
         const progressBar = form.querySelector(".progress-bar");
         const progressValue = form.querySelector("[data-progress-value]");
         const downloadLink = form.querySelector(".download-link");
+        const billingSummary = form.querySelector(".billing-summary");
+        const billingTotal = form.querySelector("[data-billing-total]");
         const originalText = button.textContent;
         const fallbackName = form.action.endsWith("/excel") ? "converted.csv" : "processed.pdf";
+        const requiresPayment = form.hasAttribute("data-payment-required");
         let progress = 0;
         let progressTimer = null;
 
@@ -353,6 +441,9 @@ PAGE = """
         }
         downloadLink.classList.remove("ready");
         downloadLink.removeAttribute("href");
+        if (billingSummary) {
+          billingSummary.classList.remove("ready");
+        }
 
         const setProgress = (value) => {
           progress = Math.max(progress, Math.min(value, 100));
@@ -361,16 +452,38 @@ PAGE = """
         };
 
         button.disabled = true;
-        button.textContent = "Processing...";
+        button.textContent = requiresPayment ? "Calculating..." : "Processing...";
         progressWrap.classList.add("active");
         progressWrap.setAttribute("aria-hidden", "false");
         setProgress(8);
         status.classList.remove("error", "success");
-        status.textContent = form.action.endsWith("/ocr")
-          ? "Uploading and processing. Fast mode skips pages that already contain text."
+        status.textContent = requiresPayment
+          ? "Uploading PDF to calculate page count and payment amount."
           : "Uploading and converting. Large workbooks may take a moment.";
 
         try {
+          const formData = new FormData(form);
+
+          if (requiresPayment) {
+            const order = await createOcrOrder(form);
+            if (billingSummary && billingTotal) {
+              billingTotal.textContent = `${order.pages} page${order.pages === 1 ? "" : "s"} x INR 0.50 = INR ${order.display_amount}`;
+              billingSummary.classList.add("ready");
+            }
+
+            setProgress(18);
+            button.textContent = "Waiting for payment...";
+            status.textContent = `Complete INR ${order.display_amount} payment to start OCR.`;
+            const payment = await openRazorpayCheckout(order);
+
+            formData.append("razorpay_payment_id", payment.razorpay_payment_id);
+            formData.append("razorpay_order_id", payment.razorpay_order_id);
+            formData.append("razorpay_signature", payment.razorpay_signature);
+            setProgress(26);
+            button.textContent = "Processing...";
+            status.textContent = "Payment verified by Razorpay. OCR is processing now.";
+          }
+
           progressTimer = window.setInterval(() => {
             const next = progress < 55 ? progress + 7 : progress < 86 ? progress + 3 : progress + 0.6;
             setProgress(Math.min(next, 94));
@@ -378,12 +491,11 @@ PAGE = """
 
           const response = await fetch(form.action, {
             method: "POST",
-            body: new FormData(form),
+            body: formData,
           });
 
           if (!response.ok) {
-            const message = await response.text();
-            throw new Error(message.replace(/<[^>]*>/g, " ").replace(/\\s+/g, " ").trim() || "Processing failed.");
+            throw new Error(await errorFromResponse(response, "Processing failed."));
           }
 
           const blob = await response.blob();
@@ -441,6 +553,40 @@ def remove_later(path):
         return response
 
 
+def razorpay_keys():
+    key_id = os.getenv("RAZORPAY_KEY_ID", "").strip()
+    key_secret = os.getenv("RAZORPAY_KEY_SECRET", "").strip()
+    if not key_id or not key_secret:
+        raise RuntimeError("Razorpay keys are not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.")
+    return key_id, key_secret
+
+
+def count_pdf_pages(path):
+    reader = PdfReader(path)
+    return len(reader.pages)
+
+
+def save_pdf_upload(uploaded):
+    if not uploaded or uploaded.filename == "":
+        raise ValueError("Please upload a PDF file.")
+
+    filename = secure_filename(uploaded.filename)
+    if not filename.lower().endswith(".pdf"):
+        raise ValueError("Please upload a valid PDF file.")
+
+    input_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    input_file.close()
+    uploaded.save(input_file.name)
+    return filename, input_file.name
+
+
+def verify_razorpay_signature(order_id, payment_id, signature):
+    _, key_secret = razorpay_keys()
+    message = f"{order_id}|{payment_id}".encode("utf-8")
+    expected = hmac.new(key_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature or "")
+
+
 def ocr_options(mode):
     workers = max(1, min(4, multiprocessing.cpu_count()))
     if mode == "accurate":
@@ -465,39 +611,110 @@ def ocr_options(mode):
     }
 
 
+@app.post("/ocr/order")
+def create_ocr_order():
+    input_path = None
+    try:
+        _, input_path = save_pdf_upload(request.files.get("pdf_file"))
+        page_count = count_pdf_pages(input_path)
+        if page_count < 1:
+            return jsonify({"error": "This PDF does not contain any pages."}), 400
+
+        key_id, _ = razorpay_keys()
+        amount = page_count * OCR_PRICE_PER_PAGE_PAISE
+        client = razorpay.Client(auth=(key_id, key_secret))
+        order = client.order.create(
+            {
+                "amount": amount,
+                "currency": "INR",
+                "receipt": f"ocr_{uuid.uuid4().hex[:28]}",
+                "notes": {
+                    "service": "pdf_ocr",
+                    "pages": str(page_count),
+                    "price_per_page": "0.50",
+                },
+            }
+        )
+
+        PENDING_ORDERS[order["id"]] = {
+            "amount": amount,
+            "pages": page_count,
+            "currency": "INR",
+        }
+
+        return jsonify(
+            {
+                "key": key_id,
+                "order_id": order["id"],
+                "amount": amount,
+                "currency": "INR",
+                "pages": page_count,
+                "display_amount": f"{amount / 100:.2f}",
+            }
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Could not create payment order: {exc}"}), 500
+    finally:
+        if input_path:
+            try:
+                os.remove(input_path)
+            except OSError:
+                pass
+
+
 @app.post("/ocr")
 def ocr_pdf():
-    uploaded = request.files.get("pdf_file")
-    if not uploaded or uploaded.filename == "":
-        return render_page("Please upload a PDF file."), 400
-
-    filename = secure_filename(uploaded.filename)
-    if not filename.lower().endswith(".pdf"):
-        return render_page("Please upload a valid PDF file."), 400
-
-    input_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     output_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    input_file.close()
     output_file.close()
+    output_path = output_file.name
+    output_sent = False
+    input_path = None
 
     try:
-        uploaded.save(input_file.name)
-        os.remove(output_file.name)
+        filename, input_path = save_pdf_upload(request.files.get("pdf_file"))
+        page_count = count_pdf_pages(input_path)
+        order_id = request.form.get("razorpay_order_id", "")
+        payment_id = request.form.get("razorpay_payment_id", "")
+        signature = request.form.get("razorpay_signature", "")
+        order = PENDING_ORDERS.get(order_id)
+
+        if not order_id or not payment_id or not signature:
+            return render_page("Complete the Razorpay payment before OCR processing."), 402
+        if not order:
+            return render_page("Payment order expired. Please calculate payment and try again."), 402
+        if order["pages"] != page_count:
+            return render_page("Uploaded PDF page count changed after payment. Please pay again for this file."), 400
+        if not verify_razorpay_signature(order_id, payment_id, signature):
+            return render_page("Payment verification failed. Please try again."), 402
+
+        os.remove(output_path)
         ocrmypdf.ocr(
-            input_file.name,
-            output_file.name,
+            input_path,
+            output_path,
             **ocr_options(request.form.get("mode", "fast")),
         )
         download_name = f"ocr_{filename}"
-        remove_later(output_file.name)
-        return send_file(output_file.name, as_attachment=True, download_name=download_name)
+        remove_later(output_path)
+        PENDING_ORDERS.pop(order_id, None)
+        output_sent = True
+        return send_file(output_path, as_attachment=True, download_name=download_name)
+    except ValueError as exc:
+        return render_page(str(exc)), 400
     except Exception as exc:
         return render_page(f"OCR failed: {exc}"), 500
     finally:
-        try:
-            os.remove(input_file.name)
-        except OSError:
-            pass
+        if input_path:
+            try:
+                os.remove(input_path)
+            except OSError:
+                pass
+        if not output_sent:
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
 
 
 def convert_xlsx_to_csv(input_path, output_path):
