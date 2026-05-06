@@ -1,5 +1,5 @@
 ---
-title: Document Converter Pro
+title: SCANLY
 emoji: 📄
 colorFrom: blue
 colorTo: green
@@ -7,15 +7,21 @@ sdk: docker
 app_port: 7860
 ---
 
-# Document Converter Pro
+# SCANLY
 
-Document Converter Pro is a Flask web app for:
+SCANLY is a Flask web app for:
 
 - PDF OCR conversion with `ocrmypdf`
 - Excel to CSV conversion with `pandas` and `openpyxl`
+- PDF to Word conversion
+- PDF splitting
+- PDF page deletion
+- PDF text summary
+- Image enhancement
+- Basic image background removal
 - Fast default OCR mode that skips pages that already contain text
 - Streaming `.xlsx` conversion to reduce memory use on large workbooks
-- Razorpay payment before PDF OCR processing at INR 0.50 per PDF page
+- Razorpay payment before paid processing
 
 ## Important: GitHub Pages will not run this app
 
@@ -37,7 +43,7 @@ The included `Dockerfile` installs the required OCR system packages and starts `
 
 ## Razorpay setup
 
-PDF OCR processing is payment gated. The app counts PDF pages, creates a Razorpay order, waits for a successful Checkout payment, verifies the payment signature on the server, and only then starts OCR.
+PDF and image processing is payment gated. The app counts PDF pages or applies the image flat fee, creates a Razorpay order, waits for a successful Checkout payment, verifies the payment signature on the server, and only then starts processing.
 
 Set these environment variables in your deployment host or Hugging Face Space secrets:
 
@@ -46,7 +52,9 @@ RAZORPAY_KEY_ID=rzp_test_or_live_key_id
 RAZORPAY_KEY_SECRET=your_key_secret
 ```
 
-The OCR price is configured in `app.py` as `OCR_PRICE_PER_PAGE_PAISE = 50`, which is INR 0.50 per page.
+PDF service pricing is configured in `app.py` as `PDF_PRICE_PER_PAGE_PAISE = 20`, which is INR 0.20 per page.
+
+Image service pricing is configured in `app.py` as `IMAGE_PRICE_PAISE = 1000`, which is INR 10.00 per image.
 
 The owner bypass key defaults to `215836`. To change it without editing code, set this optional secret:
 
