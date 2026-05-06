@@ -15,7 +15,6 @@ import razorpay
 from docx import Document
 from flask import Flask, after_this_request, jsonify, render_template_string, request, send_file
 from openpyxl import load_workbook
-from PIL import Image, ImageEnhance, ImageFilter
 from pypdf import PdfReader, PdfWriter
 from werkzeug.utils import secure_filename
 
@@ -23,8 +22,12 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
-PDF_PRICE_PER_PAGE_PAISE = 20
-IMAGE_PRICE_PAISE = 1000
+OCR_PRICE_PER_PAGE_PAISE = 500
+PDF_FREE_PAGES = 10
+PDF_EXTRA_PAGE_PRICE_PAISE = 200
+EXCEL_FREE_ROWS = 500
+EXCEL_PRICE_PER_EXTRA_ROW_PAISE = 20
+EXCEL_MAX_ROWS = 50000
 PENDING_ORDERS = {}
 BYPASS_ACCESS_KEY = os.getenv("OCR_BYPASS_KEY", "215836").strip()
 
@@ -35,10 +38,7 @@ PDF_SERVICES = {
     "pdf-delete-pages": "PDF Delete Pages",
     "pdf-summary": "PDF Summary",
 }
-IMAGE_SERVICES = {
-    "blur-to-hd": "Blur to HD Image",
-    "background-remover": "Background Remover",
-}
+EXCEL_SERVICE = "excel"
 
 
 PAGE = """
@@ -500,7 +500,6 @@ PAGE = """
         <a href="#home">Home</a>
         <a href="#services">Services</a>
         <a href="#ocr">OCR</a>
-        <a href="#images">Images</a>
       </div>
     </nav>
 
@@ -509,8 +508,9 @@ PAGE = """
         <h1>SCANLY</h1>
         <p>Convert, clean, split, summarize, and enhance files from one payment-ready workspace. Pick a service, upload the file, pay only after the page count is calculated, then download when processing is complete.</p>
         <div class="price-row">
-          <span class="price-pill">PDF tools: INR 0.20 per page</span>
-          <span class="price-pill">Image tools: INR 10.00 per image</span>
+          <span class="price-pill">OCR: INR 5.00 per page</span>
+          <span class="price-pill">PDF tools: first 10 pages free, then INR 2.00 per page</span>
+          <span class="price-pill">Excel to CSV: first 500 rows free, then INR 0.20 per row</span>
         </div>
         <div class="service-buttons" aria-label="SCANLY services">
           <a class="service-link" href="#ocr"><span>OCR</span><span>-></span></a>
@@ -518,8 +518,6 @@ PAGE = """
           <a class="service-link" href="#pdf-to-word"><span>PDF to Word</span><span>-></span></a>
           <a class="service-link" href="#pdf-splitter"><span>PDF Splitter</span><span>-></span></a>
           <a class="service-link" href="#pdf-delete-pages"><span>PDF Delete Page</span><span>-></span></a>
-          <a class="service-link" href="#blur-to-hd"><span>Blur to HD Image</span><span>-></span></a>
-          <a class="service-link" href="#background-remover"><span>Background Remover</span><span>-></span></a>
           <a class="service-link" href="#pdf-summary"><span>Summary for PDF</span><span>-></span></a>
         </div>
       </div>
@@ -542,7 +540,7 @@ PAGE = """
     <section class="tools" id="services">
       <div class="section-head">
         <h2>Services</h2>
-        <p>PDF services use Razorpay at INR 0.20 per page. Image services use INR 10.00 per image. Excel to CSV stays free.</p>
+        <p>OCR is INR 5.00 per page. Other PDF tools include 10 free pages, then INR 2.00 per extra page. Excel to CSV includes 500 free rows, then INR 0.20 per extra row up to 50,000 rows.</p>
       </div>
       <div class="tool-grid">
         <article class="tool-card" id="ocr">
@@ -551,7 +549,7 @@ PAGE = """
             <h3>OCR</h3>
             <p>Turn scanned PDFs into searchable documents. Fast mode skips pages that already contain selectable text.</p>
           </div>
-          <form action="/ocr" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="ocr" data-price-note="Rate: INR 0.20 per PDF page. A valid access key skips payment.">
+          <form action="/ocr" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="ocr" data-price-note="Rate: INR 5.00 per PDF page. A valid access key skips payment.">
             <input type="file" name="pdf_file" accept="application/pdf,.pdf" required>
             <select name="mode" aria-label="OCR mode">
               <option value="fast" selected>Fast OCR - skip pages that already have text</option>
@@ -569,13 +567,15 @@ PAGE = """
 
         <article class="tool-card" id="excel">
           <div class="tool-top">
-            <span class="tag">Free tool</span>
+            <span class="tag">Spreadsheet tool</span>
             <h3>Excel to CSV</h3>
-            <p>Convert the first worksheet into a clean UTF-8 CSV file.</p>
+            <p>Convert the first worksheet into a clean UTF-8 CSV file. First 500 rows are free, and files up to 50,000 rows are supported.</p>
           </div>
-          <form action="/excel" method="post" enctype="multipart/form-data" data-download-form>
+          <form action="/excel" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="excel" data-price-note="First 500 rows free. Then INR 0.20 per extra row. Maximum 50,000 rows.">
             <input type="file" name="excel_file" accept=".xlsx,.xls" required>
-            <button type="submit">Convert to CSV</button>
+            <input type="password" name="access_key" inputmode="numeric" autocomplete="off" placeholder="Access key for free processing">
+            <button type="submit">Calculate and Convert</button>
+            <div class="billing-summary" aria-live="polite"><span data-billing-total></span><span data-billing-note></span></div>
             <div class="progress-wrap" aria-hidden="true"><div class="progress-label"><span>Processing</span><span data-progress-value>0%</span></div><div class="progress-track"><div class="progress-bar"></div></div></div>
             <div class="status" aria-live="polite"></div>
             <a class="download-link" href="#" download>Download result</a>
@@ -589,7 +589,7 @@ PAGE = """
             <h3>PDF to Word</h3>
             <p>Extract readable PDF text into a Word document.</p>
           </div>
-          <form action="/pdf-to-word" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="pdf-to-word" data-price-note="Rate: INR 0.20 per PDF page.">
+          <form action="/pdf-to-word" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="pdf-to-word" data-price-note="First 10 PDF pages free. Then INR 2.00 per additional page.">
             <input type="file" name="pdf_file" accept="application/pdf,.pdf" required>
             <input type="password" name="access_key" inputmode="numeric" autocomplete="off" placeholder="Access key for free processing">
             <button type="submit">Pay and Convert</button>
@@ -607,7 +607,7 @@ PAGE = """
             <h3>PDF Splitter</h3>
             <p>Split one PDF into separate single-page PDF files inside a ZIP.</p>
           </div>
-          <form action="/pdf-splitter" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="pdf-splitter" data-price-note="Rate: INR 0.20 per PDF page.">
+          <form action="/pdf-splitter" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="pdf-splitter" data-price-note="First 10 PDF pages free. Then INR 2.00 per additional page.">
             <input type="file" name="pdf_file" accept="application/pdf,.pdf" required>
             <input type="password" name="access_key" inputmode="numeric" autocomplete="off" placeholder="Access key for free processing">
             <button type="submit">Pay and Split</button>
@@ -625,7 +625,7 @@ PAGE = """
             <h3>PDF Delete Page</h3>
             <p>Remove selected pages and download a cleaned PDF.</p>
           </div>
-          <form action="/pdf-delete-pages" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="pdf-delete-pages" data-price-note="Rate: INR 0.20 per PDF page.">
+          <form action="/pdf-delete-pages" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="pdf-delete-pages" data-price-note="First 10 PDF pages free. Then INR 2.00 per additional page.">
             <input type="file" name="pdf_file" accept="application/pdf,.pdf" required>
             <input type="text" name="pages_to_delete" placeholder="Pages to delete, example: 1,3-5" required>
             <input type="password" name="access_key" inputmode="numeric" autocomplete="off" placeholder="Access key for free processing">
@@ -644,7 +644,7 @@ PAGE = """
             <h3>Summary for PDF</h3>
             <p>Create a short text summary from extracted PDF text.</p>
           </div>
-          <form action="/pdf-summary" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="pdf-summary" data-price-note="Rate: INR 0.20 per PDF page.">
+          <form action="/pdf-summary" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="pdf-summary" data-price-note="First 10 PDF pages free. Then INR 2.00 per additional page.">
             <input type="file" name="pdf_file" accept="application/pdf,.pdf" required>
             <input type="password" name="access_key" inputmode="numeric" autocomplete="off" placeholder="Access key for free processing">
             <button type="submit">Pay and Summarize</button>
@@ -656,50 +656,6 @@ PAGE = """
           <p class="details">For scanned PDFs, run OCR first, then summarize the searchable PDF.</p>
         </article>
 
-        <article class="tool-card" id="images">
-          <div class="tool-top">
-            <span class="tag">Image tools</span>
-            <h3>Image Processing</h3>
-            <p>Use local image filters for sharper output or a simple background cutout.</p>
-          </div>
-          <p class="details">Each image tool costs INR 10.00 per image.</p>
-        </article>
-
-        <article class="tool-card" id="blur-to-hd">
-          <div class="tool-top">
-            <span class="tag">Image tool</span>
-            <h3>Blur to HD Image</h3>
-            <p>Upscale, sharpen, and improve contrast for soft images.</p>
-          </div>
-          <form action="/blur-to-hd" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="blur-to-hd" data-price-note="Rate: INR 10.00 per image.">
-            <input type="file" name="image_file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" required>
-            <input type="password" name="access_key" inputmode="numeric" autocomplete="off" placeholder="Access key for free processing">
-            <button type="submit">Pay and Enhance</button>
-            <div class="billing-summary" aria-live="polite"><span data-billing-total></span><span data-billing-note></span></div>
-            <div class="progress-wrap" aria-hidden="true"><div class="progress-label"><span>Processing</span><span data-progress-value>0%</span></div><div class="progress-track"><div class="progress-bar"></div></div></div>
-            <div class="status" aria-live="polite"></div>
-            <a class="download-link" href="#" download>Download result</a>
-          </form>
-          <p class="details">Best for mildly blurred screenshots, IDs, and document photos.</p>
-        </article>
-
-        <article class="tool-card" id="background-remover">
-          <div class="tool-top">
-            <span class="tag">Image tool</span>
-            <h3>Background Remover</h3>
-            <p>Remove a plain background by detecting the image corner color.</p>
-          </div>
-          <form action="/background-remover" method="post" enctype="multipart/form-data" data-download-form data-paid-form data-service="background-remover" data-price-note="Rate: INR 10.00 per image.">
-            <input type="file" name="image_file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" required>
-            <input type="password" name="access_key" inputmode="numeric" autocomplete="off" placeholder="Access key for free processing">
-            <button type="submit">Pay and Remove Background</button>
-            <div class="billing-summary" aria-live="polite"><span data-billing-total></span><span data-billing-note></span></div>
-            <div class="progress-wrap" aria-hidden="true"><div class="progress-label"><span>Processing</span><span data-progress-value>0%</span></div><div class="progress-track"><div class="progress-bar"></div></div></div>
-            <div class="status" aria-live="polite"></div>
-            <a class="download-link" href="#" download>Download result</a>
-          </form>
-          <p class="details">Works best with white, light, or single-color backgrounds.</p>
-        </article>
       </div>
     </section>
   </main>
@@ -825,16 +781,22 @@ PAGE = """
                 billingNote.textContent = form.dataset.priceNote || "";
                 billingSummary.classList.add("ready");
               }
-              setProgress(18);
-              button.textContent = "Waiting for payment...";
-              status.textContent = `Complete INR ${order.display_amount} payment to start.`;
-              const payment = await openRazorpayCheckout(order);
-              formData.append("razorpay_payment_id", payment.razorpay_payment_id);
-              formData.append("razorpay_order_id", payment.razorpay_order_id);
-              formData.append("razorpay_signature", payment.razorpay_signature);
-              setProgress(26);
-              button.textContent = "Processing...";
-              status.textContent = "Payment verified. Processing now.";
+              if (order.free) {
+                setProgress(24);
+                button.textContent = "Processing...";
+                status.textContent = "Free tier applied. Processing now.";
+              } else {
+                setProgress(18);
+                button.textContent = "Waiting for payment...";
+                status.textContent = `Complete INR ${order.display_amount} payment to start.`;
+                const payment = await openRazorpayCheckout(order);
+                formData.append("razorpay_payment_id", payment.razorpay_payment_id);
+                formData.append("razorpay_order_id", payment.razorpay_order_id);
+                formData.append("razorpay_signature", payment.razorpay_signature);
+                setProgress(26);
+                button.textContent = "Processing...";
+                status.textContent = "Payment verified. Processing now.";
+              }
             }
           }
 
@@ -939,17 +901,30 @@ def save_pdf_upload(uploaded):
     return filename, input_file.name
 
 
-def save_image_upload(uploaded):
+def save_excel_upload(uploaded):
     if not uploaded or uploaded.filename == "":
-        raise ValueError("Please upload an image file.")
+        raise ValueError("Please upload an Excel file.")
     filename = secure_filename(uploaded.filename)
     extension = os.path.splitext(filename)[1].lower()
-    if extension not in {".png", ".jpg", ".jpeg", ".webp"}:
-        raise ValueError("Please upload a PNG, JPG, JPEG, or WEBP image.")
+    if extension not in {".xlsx", ".xls"}:
+        raise ValueError("Please upload a valid Excel file.")
     input_file = tempfile.NamedTemporaryFile(suffix=extension, delete=False)
     input_file.close()
     uploaded.save(input_file.name)
-    return filename, input_file.name
+    return filename, input_file.name, extension
+
+
+def count_excel_rows(input_path, extension):
+    if extension == ".xlsx":
+        workbook = load_workbook(input_path, read_only=True, data_only=True)
+        try:
+            sheet = workbook.active
+            rows = sum(1 for _ in sheet.iter_rows(values_only=True))
+        finally:
+            workbook.close()
+        return rows
+
+    return len(pd.read_excel(input_path, header=None))
 
 
 def order_amount_for(service, path):
@@ -957,14 +932,31 @@ def order_amount_for(service, path):
         pages = count_pdf_pages(path)
         if pages < 1:
             raise ValueError("This PDF does not contain any pages.")
-        amount = pages * PDF_PRICE_PER_PAGE_PAISE
-        return amount, pages, f"{pages} page{'s' if pages != 1 else ''} x INR 0.20 = INR {amount / 100:.2f}"
-    if service in IMAGE_SERVICES:
-        return IMAGE_PRICE_PAISE, 1, "1 image x INR 10.00 = INR 10.00"
+        if service == "ocr":
+            amount = pages * OCR_PRICE_PER_PAGE_PAISE
+            return amount, pages, f"{pages} page{'s' if pages != 1 else ''} x INR 5.00 = INR {amount / 100:.2f}"
+
+        billable_pages = max(0, pages - PDF_FREE_PAGES)
+        amount = billable_pages * PDF_EXTRA_PAGE_PRICE_PAISE
+        if amount == 0:
+            return amount, pages, f"{pages} page{'s' if pages != 1 else ''}. Free tier applied."
+        return amount, pages, f"{PDF_FREE_PAGES} pages free + {billable_pages} extra page{'s' if billable_pages != 1 else ''} x INR 2.00 = INR {amount / 100:.2f}"
     raise ValueError("Unknown paid service.")
 
 
+def excel_order_amount(row_count):
+    if row_count > EXCEL_MAX_ROWS:
+        raise ValueError("Excel files above 50,000 rows are not supported.")
+    billable_rows = max(0, row_count - EXCEL_FREE_ROWS)
+    amount = billable_rows * EXCEL_PRICE_PER_EXTRA_ROW_PAISE
+    if amount == 0:
+        return amount, row_count, f"{row_count} row{'s' if row_count != 1 else ''}. Free tier applied."
+    return amount, row_count, f"{EXCEL_FREE_ROWS} rows free + {billable_rows} extra row{'s' if billable_rows != 1 else ''} x INR 0.20 = INR {amount / 100:.2f}"
+
+
 def create_order(service, amount, pages):
+    if amount == 0:
+        return "", None
     key_id, key_secret = razorpay_keys()
     client = razorpay.Client(auth=(key_id, key_secret))
     order = client.order.create(
@@ -995,25 +987,28 @@ def create_payment_order():
     try:
         if service in PDF_SERVICES:
             _, input_path = save_pdf_upload(request.files.get("pdf_file"))
-        elif service in IMAGE_SERVICES:
-            _, input_path = save_image_upload(request.files.get("image_file"))
-            Image.open(input_path).verify()
+            amount, pages, summary = order_amount_for(service, input_path)
+            description = PDF_SERVICES[service]
+        elif service == EXCEL_SERVICE:
+            _, input_path, extension = save_excel_upload(request.files.get("excel_file"))
+            amount, pages, summary = excel_order_amount(count_excel_rows(input_path, extension))
+            description = "Excel to CSV"
         else:
             return jsonify({"error": "Unknown service."}), 400
 
-        amount, pages, summary = order_amount_for(service, input_path)
         key_id, order = create_order(service, amount, pages)
-        description = PDF_SERVICES.get(service) or IMAGE_SERVICES.get(service) or "SCANLY service"
+        order_id = order["id"] if order else ""
         return jsonify(
             {
                 "key": key_id,
-                "order_id": order["id"],
+                "order_id": order_id,
                 "amount": amount,
                 "currency": "INR",
                 "pages": pages,
                 "display_amount": f"{amount / 100:.2f}",
                 "summary": summary,
                 "description": description,
+                "free": amount == 0,
             }
         )
     except ValueError as exc:
@@ -1038,13 +1033,14 @@ def create_ocr_order():
         return jsonify(
             {
                 "key": key_id,
-                "order_id": order["id"],
+                "order_id": order["id"] if order else "",
                 "amount": amount,
                 "currency": "INR",
                 "pages": pages,
                 "display_amount": f"{amount / 100:.2f}",
                 "summary": summary,
                 "description": "PDF OCR",
+                "free": amount == 0,
             }
         )
     except ValueError as exc:
@@ -1060,6 +1056,8 @@ def create_ocr_order():
 
 
 def payment_error_for(service, amount, pages):
+    if amount == 0:
+        return None
     if has_valid_bypass_key():
         return None
     order_id = request.form.get("razorpay_order_id", "")
@@ -1362,101 +1360,6 @@ def pdf_summary():
                 pass
 
 
-@app.post("/blur-to-hd")
-def blur_to_hd():
-    input_path = None
-    output_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-    output_file.close()
-    output_sent = False
-    try:
-        filename, input_path = save_image_upload(request.files.get("image_file"))
-        amount, pages, _ = order_amount_for("blur-to-hd", input_path)
-        payment_error = payment_error_for("blur-to-hd", amount, pages)
-        if payment_error:
-            return payment_error
-        image = Image.open(input_path).convert("RGB")
-        width, height = image.size
-        image = image.resize((width * 2, height * 2), Image.Resampling.LANCZOS)
-        image = ImageEnhance.Sharpness(image).enhance(2.4)
-        image = ImageEnhance.Contrast(image).enhance(1.12)
-        image = image.filter(ImageFilter.UnsharpMask(radius=2, percent=160, threshold=3))
-        image.save(output_file.name, "PNG", optimize=True)
-        remove_later(output_file.name)
-        finish_paid_order()
-        output_sent = True
-        return send_file(output_file.name, as_attachment=True, download_name=f"hd_{os.path.splitext(filename)[0]}.png")
-    except ValueError as exc:
-        return render_page(str(exc)), 400
-    except Exception as exc:
-        return render_page(f"Image enhancement failed: {exc}"), 500
-    finally:
-        if input_path:
-            try:
-                os.remove(input_path)
-            except OSError:
-                pass
-        if not output_sent:
-            try:
-                os.remove(output_file.name)
-            except OSError:
-                pass
-
-
-def remove_plain_background(image):
-    image = image.convert("RGBA")
-    width, height = image.size
-    pixels = image.load()
-    sample_points = [(0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1)]
-    samples = [pixels[x, y][:3] for x, y in sample_points]
-    background = tuple(sum(color[channel] for color in samples) // len(samples) for channel in range(3))
-    threshold = 46
-    for y in range(height):
-        for x in range(width):
-            red, green, blue, alpha = pixels[x, y]
-            distance = abs(red - background[0]) + abs(green - background[1]) + abs(blue - background[2])
-            if distance < threshold:
-                pixels[x, y] = (red, green, blue, 0)
-            elif distance < threshold * 2:
-                pixels[x, y] = (red, green, blue, max(80, alpha - 80))
-    return image
-
-
-@app.post("/background-remover")
-def background_remover():
-    input_path = None
-    output_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-    output_file.close()
-    output_sent = False
-    try:
-        filename, input_path = save_image_upload(request.files.get("image_file"))
-        amount, pages, _ = order_amount_for("background-remover", input_path)
-        payment_error = payment_error_for("background-remover", amount, pages)
-        if payment_error:
-            return payment_error
-        image = Image.open(input_path)
-        output = remove_plain_background(image)
-        output.save(output_file.name, "PNG", optimize=True)
-        remove_later(output_file.name)
-        finish_paid_order()
-        output_sent = True
-        return send_file(output_file.name, as_attachment=True, download_name=f"transparent_{os.path.splitext(filename)[0]}.png")
-    except ValueError as exc:
-        return render_page(str(exc)), 400
-    except Exception as exc:
-        return render_page(f"Background removal failed: {exc}"), 500
-    finally:
-        if input_path:
-            try:
-                os.remove(input_path)
-            except OSError:
-                pass
-        if not output_sent:
-            try:
-                os.remove(output_file.name)
-            except OSError:
-                pass
-
-
 def convert_xlsx_to_csv(input_path, output_path):
     workbook = load_workbook(input_path, read_only=True, data_only=True)
     try:
@@ -1479,30 +1382,37 @@ def convert_excel_file(input_path, output_path, extension):
 
 @app.post("/excel")
 def excel_to_csv():
-    uploaded = request.files.get("excel_file")
-    if not uploaded or uploaded.filename == "":
-        return render_page("Please upload an Excel file."), 400
-    filename = secure_filename(uploaded.filename)
-    if not filename.lower().endswith((".xlsx", ".xls")):
-        return render_page("Please upload a valid Excel file."), 400
-    extension = os.path.splitext(filename)[1].lower()
-    input_file = tempfile.NamedTemporaryFile(suffix=extension, delete=False)
     output_file = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
-    input_file.close()
     output_file.close()
+    input_path = None
+    output_sent = False
     try:
-        uploaded.save(input_file.name)
-        convert_excel_file(input_file.name, output_file.name, extension)
+        filename, input_path, extension = save_excel_upload(request.files.get("excel_file"))
+        amount, rows, _ = excel_order_amount(count_excel_rows(input_path, extension))
+        payment_error = payment_error_for(EXCEL_SERVICE, amount, rows)
+        if payment_error:
+            return payment_error
+        convert_excel_file(input_path, output_file.name, extension)
         download_name = f"{os.path.splitext(filename)[0]}.csv"
         remove_later(output_file.name)
+        finish_paid_order()
+        output_sent = True
         return send_file(output_file.name, as_attachment=True, download_name=download_name)
+    except ValueError as exc:
+        return render_page(str(exc)), 400
     except Exception as exc:
         return render_page(f"Conversion failed: {exc}"), 500
     finally:
-        try:
-            os.remove(input_file.name)
-        except OSError:
-            pass
+        if input_path:
+            try:
+                os.remove(input_path)
+            except OSError:
+                pass
+        if not output_sent:
+            try:
+                os.remove(output_file.name)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

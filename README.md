@@ -17,8 +17,6 @@ SCANLY is a Flask web app for:
 - PDF splitting
 - PDF page deletion
 - PDF text summary
-- Image enhancement
-- Basic image background removal
 - Fast default OCR mode that skips pages that already contain text
 - Streaming `.xlsx` conversion to reduce memory use on large workbooks
 - Razorpay payment before paid processing
@@ -43,7 +41,7 @@ The included `Dockerfile` installs the required OCR system packages and starts `
 
 ## Razorpay setup
 
-PDF and image processing is payment gated. The app counts PDF pages or applies the image flat fee, creates a Razorpay order, waits for a successful Checkout payment, verifies the payment signature on the server, and only then starts processing.
+PDF and paid Excel processing is payment gated. The app counts PDF pages or Excel rows, creates a Razorpay order when the file exceeds the free tier, waits for a successful Checkout payment, verifies the payment signature on the server, and only then starts processing.
 
 Set these environment variables in your deployment host or Hugging Face Space secrets:
 
@@ -52,9 +50,11 @@ RAZORPAY_KEY_ID=rzp_test_or_live_key_id
 RAZORPAY_KEY_SECRET=your_key_secret
 ```
 
-PDF service pricing is configured in `app.py` as `PDF_PRICE_PER_PAGE_PAISE = 20`, which is INR 0.20 per page.
+OCR pricing is configured in `app.py` as `OCR_PRICE_PER_PAGE_PAISE = 500`, which is INR 5.00 per page.
 
-Image service pricing is configured in `app.py` as `IMAGE_PRICE_PAISE = 1000`, which is INR 10.00 per image.
+Other PDF tools use `PDF_FREE_PAGES = 10` and `PDF_EXTRA_PAGE_PRICE_PAISE = 200`, which means the first 10 pages are free and additional pages cost INR 2.00 per page.
+
+Excel to CSV uses `EXCEL_FREE_ROWS = 500`, `EXCEL_PRICE_PER_EXTRA_ROW_PAISE = 20`, and `EXCEL_MAX_ROWS = 50000`, which means the first 500 rows are free, additional rows cost INR 0.20 per row, and files above 50,000 rows are rejected.
 
 The owner bypass key defaults to `215836`. To change it without editing code, set this optional secret:
 
